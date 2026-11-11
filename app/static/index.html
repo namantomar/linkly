@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Linkly — URL Shortener</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>🔗 Linkly</h1>
+      <p class="subtitle">Shorten URLs. Track every click.</p>
+    </header>
+
+    <section class="card">
+      <form id="shorten-form">
+        <label for="long-url">Long URL</label>
+        <input id="long-url" type="url" placeholder="https://example.com/a/very/long/url" required />
+
+        <div class="row">
+          <div class="field">
+            <label for="custom-alias">Custom alias <span class="optional">(optional)</span></label>
+            <input id="custom-alias" type="text" placeholder="my-link" minlength="3" maxlength="30" />
+          </div>
+          <div class="field">
+            <label for="expires">Expires in <span class="optional">(days, optional)</span></label>
+            <input id="expires" type="number" min="1" max="3650" placeholder="30" />
+          </div>
+        </div>
+
+        <button type="submit">Shorten</button>
+        <p id="message" class="message" role="status"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="table-header">
+        <h2>Your links</h2>
+        <button id="refresh" type="button" class="secondary">Refresh</button>
+      </div>
+      <p id="empty" class="empty">No links yet — shorten one above.</p>
+      <table id="links-table" hidden>
+        <thead>
+          <tr>
+            <th>Short link</th>
+            <th>Destination</th>
+            <th>Clicks</th>
+            <th>Created</th>
+            <th>Expires</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="links-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("shorten-form");
+    const message = document.getElementById("message");
+    const table = document.getElementById("links-table");
+    const tbody = document.getElementById("links-body");
+    const empty = document.getElementById("empty");
+
+    function showMessage(text, isError) {
+      message.textContent = text;
+      message.className = "message " + (isError ? "error" : "success");
+    }
+
+    function formatDate(value) {
+      if (!value) return "—";
+      return new Date(value).toLocaleDateString(undefined, {
+        year: "numeric", month: "short", day: "numeric",
+      });
+    }
+
+    async function loadLinks() {
+      const res = await fetch("/api/links");
+      if (!res.ok) {
+        showMessage("Could not load links.", true);
+        return;
+      }
+      const links = await res.json();
+      tbody.innerHTML = "";
+      empty.hidden = links.length > 0;
+      table.hidden = links.length === 0;
+      for (const link of links) {
+        const row = document.createElement("tr");
+        row.innerHTML =
+          '<td><a href="' + link.short_url + '" target="_blank" rel="noopener">' +
+            link.short_url.replace(/^https?:\/\//, "") + "</a></td>" +
+          '<td class="truncate" title="' + link.long_url + '">' + link.long_url + "</td>" +
+          "<td>" + link.click_count + "</td>" +
+          "<td>" + formatDate(link.created_at) + "</td>" +
+          "<td>" + formatDate(link.expires_at) + "</td>" +
+          '<td><button type="button" class="delete" data-code="' + link.code + '">Delete</button></td>';
+        tbody.appendChild(row);
+      }
+    }
+
+    tbody.addEventListener("click", async (event) => {
+      const button = event.target.closest("button.delete");
+      if (!button) return;
+      const res = await fetch("/api/links/" + encodeURIComponent(button.dataset.code), {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        showMessage("Link deleted.", false);
+        await loadLinks();
+      } else {
+        showMessage("Could not delete that link.", true);
+      }
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const longUrl = document.getElementById("long-url").value.trim();
+      const customAlias = document.getElementById("custom-alias").value.trim();
+      const expires = document.getElementById("expires").value;
+      const body = { long_url: longUrl };
+      if (customAlias) body.custom_alias = customAlias;
+      if (expires) body.expires_in_days = Number(expires);
+
+      const res = await fetch("/api/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = Array.isArray(data.detail)
+          ? data.detail.map((d) => d.msg).join("; ")
+          : data.detail || "Something went wrong.";
+        showMessage(detail, true);
+        return;
+      }
+      showMessage("Short link created: " + data.short_url, false);
+      form.reset();
+      await loadLinks();
+    });
+
+    document.getElementById("refresh").addEventListener("click", loadLinks);
+    loadLinks();
+  </script>
+</body>
+</html>
